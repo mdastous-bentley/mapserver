@@ -3953,7 +3953,7 @@ PluginInitializeVirtualTable(layerVTableObj* vtable, layerObj *layer)
   assert(layer != NULL);
   assert(vtable != NULL);
 
-  layer->vtable->LayerTranslateFilter = msOracleSpatialLayerTranslateFilter;
+  vtable->LayerTranslateFilter = msOracleSpatialLayerTranslateFilter;
 
 
   vtable->LayerInitItemInfo = msOracleSpatialLayerInitItemInfo;
