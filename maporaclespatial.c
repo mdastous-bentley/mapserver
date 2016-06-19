@@ -401,6 +401,7 @@ static int msSplitData( char *data, char **geometry_column_name, char **table_na
     if (i == table_name_size) {
       table_name_size *= 2;
       *table_name = (char *) realloc(*table_name,sizeof(char *) * table_name_size);
+      tgt = *table_name + i;
     }
     *tgt = *src;
   }
