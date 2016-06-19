@@ -1755,6 +1755,11 @@ int msMSSQL2008LayerGetShapeRandom(layerObj *layer, shapeObj *shape, long *recor
         if (rc == SQL_ERROR)
           handleSQLError(layer);
 
+        /* we have a NULL geometry - we can safely move on to next record */
+        if (needLen == SQL_NULL_DATA) {
+          continue;
+        }
+
         /* allow space for coercion to geometry collection if needed*/
         wkbTemp = (char*)msSmallMalloc(needLen+9);
 
