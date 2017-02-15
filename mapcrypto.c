@@ -31,6 +31,14 @@
 #include <ctype.h>    /* isxdigit() */
 #include <stdlib.h>   /* rand() */
 #include <time.h>     /* time() */
+#define USE_DPAPI
+
+#ifdef USE_DPAPI
+#pragma comment(lib, "crypt32.lib")
+#include <Windows.h>
+#include <wincrypt.h>
+#define ENCODING_FLAG CRYPT_STRING_BASE64
+#endif
 
 #include "mapserver.h"
 
@@ -293,11 +301,52 @@ static int msLoadEncryptionKey(mapObj *map)
  *
  **********************************************************************/
 
-void msEncryptStringWithKey(const unsigned char *key, const char *in, char *out)
+void msEncryptStringWithKey(const unsigned char *key, const char *in, char **out)
 {
+#ifdef USE_DPAPI
+
+  DATA_BLOB DataEncrypted, DataUnencrypted, DataKey;
+  BOOL result;
+
+  DataKey.cbData = MS_ENCRYPTION_KEY_SIZE;
+  DataKey.pbData = (BYTE*)key;
+  DataUnencrypted.pbData = (byte *)in;
+  DataUnencrypted.cbData = (DWORD)strlen(in) + 1;
+  // encrypt the string, use the key data as additional entropy
+  result = CryptProtectData(
+    &DataUnencrypted,
+    NULL,
+    &DataKey,
+    NULL,
+    NULL,
+    CRYPTPROTECT_LOCAL_MACHINE,
+    &DataEncrypted);
+
+  // Now create a encoded string out of the binary data - the encoded string can be stored in a file
+  DWORD encodedStringLength = 0; //Length of the resulting Hex String
+  // the first call is to get the length of the resulting hex string
+  result = CryptBinaryToString(
+    DataEncrypted.pbData,
+    DataEncrypted.cbData,
+    ENCODING_FLAG | CRYPT_STRING_NOCRLF,
+    NULL,
+    &encodedStringLength);
+  // re-allocate memory for the hex string 
+  *out = msSmallRealloc(*out, encodedStringLength);
+  // create the encoded string and store it in the out variable
+  result = CryptBinaryToString(
+    DataEncrypted.pbData,
+    DataEncrypted.cbData,
+    ENCODING_FLAG | CRYPT_STRING_NOCRLF,
+    *out,
+    &encodedStringLength);
+  LocalFree(DataEncrypted.pbData);
+
+#else
   ms_uint32 v[4], w[4];
   const ms_uint32 *k;
   int last_block = MS_FALSE;
+  char *buffer = *out;
 
   /* Casting the key this way is safe only as long as longs are 4 bytes
    * on this platform */
@@ -331,15 +380,16 @@ void msEncryptStringWithKey(const unsigned char *key, const char *in, char *out)
     encipher(v, w, k);
 
     /* Append hex-encoded bytes to output, 4 bytes at a time */
-    msHexEncode((unsigned char *)w, out, 4);
-    out += 8;
-    msHexEncode((unsigned char *)(w+1), out, 4);
-    out += 8;
+    msHexEncode((unsigned char *)w, buffer, 4);
+    buffer += 8;
+    msHexEncode((unsigned char *)(w+1), buffer, 4);
+    buffer += 8;
 
   }
 
   /* Make sure output is 0-terminated */
-  *out = '\0';
+  *buffer = '\0';
+#endif
 }
 
 /**********************************************************************
@@ -353,6 +403,51 @@ void msEncryptStringWithKey(const unsigned char *key, const char *in, char *out)
 
 void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out)
 {
+#ifdef USE_DPAPI
+  BOOL result;
+  DATA_BLOB DataEncrypted, DataUnencrypted, DataKey;
+
+
+  //the input data is HEXRAW encoded
+  //first call is to get the length of the binary buffer for the encrpyted data
+  result = CryptStringToBinary(
+    in,
+    0,
+    ENCODING_FLAG,
+    NULL,
+    &DataEncrypted.cbData,
+    NULL,
+    NULL);
+  // Allocate the buffer for the encrpyted data
+  DataEncrypted.pbData = msSmallMalloc(DataEncrypted.cbData);
+  //Decode the encrpted data
+  result = CryptStringToBinary(
+    in,
+    0,
+    ENCODING_FLAG,
+    DataEncrypted.pbData,
+    &DataEncrypted.cbData,
+    NULL,
+    NULL);
+  //Unencrypt the decoded data, use the key data as additional entropy
+  DataKey.cbData = MS_ENCRYPTION_KEY_SIZE;
+  DataKey.pbData = (BYTE*)key;
+  result = CryptUnprotectData(
+    &DataEncrypted,
+    NULL,
+    &DataKey,
+    NULL,
+    NULL,
+    CRYPTPROTECT_LOCAL_MACHINE,
+    &DataUnencrypted);
+  //free the encrypted data buffer
+  msFree(DataEncrypted.pbData);
+  //copy tha unencrypted data to the output buffer
+  memcpy(out, DataUnencrypted.pbData, DataUnencrypted.cbData);
+  //free the unecrypted data buffer
+  LocalFree(DataUnencrypted.pbData);
+
+#else
   ms_uint32 v[4], w[4];
   const ms_uint32 *k;
   int last_block = MS_FALSE;
@@ -398,6 +493,7 @@ void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out)
 
   /* Make sure output is 0-terminated */
   *out = '\0';
+#endif
 }
 
 /**********************************************************************
