@@ -9,6 +9,12 @@ set ORACLE_HOME=%BASE_DIR%\instantclient_12_1\
 set PREREQ_DIR=%BASE_DIR%\release-1800-x64
 mkdir "%BASE_DIR%\build"
 pushd "%BASE_DIR%\build"
+
+set CONFIGURATION="RELWITHDEBINFO"
+if NOT "%1" == "" (
+   set CONFIGURATION=%1
+)
+
 cmake.exe -G "Visual Studio 12 2013 Win64" ^
 -DCMAKE_PREFIX_PATH="%PREREQ_DIR%" ^
 -DREGEX_DIR="%BASE_DIR%\regex-0.12" ^
@@ -30,6 +36,6 @@ cmake.exe -G "Visual Studio 12 2013 Win64" ^
 "%SRC_DIR%"
 
 Rem Now build mapserver
-cmake --build . --config RelWithDebInfo
+cmake --build . --config %CONFIGURATION%
 popd
 
