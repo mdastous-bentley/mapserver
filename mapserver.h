@@ -2850,7 +2850,7 @@ void msPopulateTextSymbolForLabelAndString(textSymbolObj *ts, labelObj *l, char 
   /* ==================================================================== */
   MS_DLL_EXPORT int msGenerateEncryptionKey(unsigned char *k);
   MS_DLL_EXPORT int msReadEncryptionKeyFromFile(const char *keyfile, unsigned char *k);
-  MS_DLL_EXPORT void msEncryptStringWithKey(const unsigned char *key, const char *in, char *out);
+  MS_DLL_EXPORT void msEncryptStringWithKey(const unsigned char *key, const char *in, char **out);
   MS_DLL_EXPORT void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out);
   MS_DLL_EXPORT char *msDecryptStringTokens(mapObj *map, const char *in);
   MS_DLL_EXPORT void msHexEncode(const unsigned char *in, char *out, int numbytes);
