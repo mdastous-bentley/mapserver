@@ -27,14 +27,13 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-
 #include "mapserver.h"
 
 
 
 void PrintUsage()
 {
-  printf("Usage: msencrypt <-keygen filename>|<-key filename string_to_encrypt>\n");
+  printf("Usage: msencrypt <-keygen filename>|<-key filename string_to_encrypt>|<-DPAPI string_to_encrypt>\n");
 }
 
 int main(int argc, char *argv[])
@@ -68,17 +67,25 @@ int main(int argc, char *argv[])
     pszBuf = (char*)malloc((strlen(argv[3])*2+17)*sizeof(char));
     MS_CHECK_ALLOC(pszBuf, (strlen(argv[3])*2+17)*sizeof(char), -1);
 
-    msEncryptStringWithKey(key, argv[3], &pszBuf);
+    msEncryptStringWithKey(key, argv[3], pszBuf);
 
     printf("%s\n", pszBuf);
-    char *unencryptedString = malloc(strlen(pszBuf));
-    msDecryptStringWithKey(key, pszBuf, unencryptedString);
-    printf("%s\n", unencryptedString);
-    msFree(unencryptedString);
-
     msFree(pszBuf);
-  } else {
+  }
+  else if( argc == 3 && strcasecmp( argv[1], "-DPAPI" ) == 0 ) {
+#ifdef SUPPORT_DPAPI
+     char *pszBuf;
+     msEncryptStringWithDPAPI( argv[2], &pszBuf );
+     printf( "%s\n", pszBuf );
+     msFree( pszBuf );
+#else
+     printf( "This version of mapserver does not support DPAPI" );
+#endif
+
+  }
+  else {
     PrintUsage();
   }
+
   return 0;
 }

@@ -593,6 +593,10 @@ char *msGetVersion()
 #ifdef USE_POINT_Z_M
   strcat(version, " SUPPORTS=POINT_Z_M");
 #endif
+/*Check if this compiled version support DPAPI method for encryption*/
+#ifdef SUPPORT_DPAPI
+  strcat( version, " SUPPORTS=DPAPI_ENCRYPTION" );
+#endif
 #ifdef USE_V8_MAPSCRIPT
   strcat(version, " SUPPORTS=V8");
 #endif

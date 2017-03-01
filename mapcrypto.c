@@ -31,18 +31,14 @@
 #include <ctype.h>    /* isxdigit() */
 #include <stdlib.h>   /* rand() */
 #include <time.h>     /* time() */
-#define USE_DPAPI
+#include "mapserver.h"
 
-#ifdef USE_DPAPI
+#ifdef SUPPORT_DPAPI
 #pragma comment(lib, "crypt32.lib")
 #include <Windows.h>
 #include <wincrypt.h>
 #define ENCODING_FLAG CRYPT_STRING_BASE64
 #endif
-
-#include "mapserver.h"
-
-
 
 
 /**********************************************************************
@@ -301,52 +297,11 @@ static int msLoadEncryptionKey(mapObj *map)
  *
  **********************************************************************/
 
-void msEncryptStringWithKey(const unsigned char *key, const char *in, char **out)
+void msEncryptStringWithKey(const unsigned char *key, const char *in, char *out)
 {
-#ifdef USE_DPAPI
-
-  DATA_BLOB DataEncrypted, DataUnencrypted, DataKey;
-  BOOL result;
-
-  DataKey.cbData = MS_ENCRYPTION_KEY_SIZE;
-  DataKey.pbData = (BYTE*)key;
-  DataUnencrypted.pbData = (byte *)in;
-  DataUnencrypted.cbData = (DWORD)strlen(in) + 1;
-  // encrypt the string, use the key data as additional entropy
-  result = CryptProtectData(
-    &DataUnencrypted,
-    NULL,
-    &DataKey,
-    NULL,
-    NULL,
-    CRYPTPROTECT_LOCAL_MACHINE,
-    &DataEncrypted);
-
-  // Now create a encoded string out of the binary data - the encoded string can be stored in a file
-  DWORD encodedStringLength = 0; //Length of the resulting Hex String
-  // the first call is to get the length of the resulting hex string
-  result = CryptBinaryToString(
-    DataEncrypted.pbData,
-    DataEncrypted.cbData,
-    ENCODING_FLAG | CRYPT_STRING_NOCRLF,
-    NULL,
-    &encodedStringLength);
-  // re-allocate memory for the hex string 
-  *out = msSmallRealloc(*out, encodedStringLength);
-  // create the encoded string and store it in the out variable
-  result = CryptBinaryToString(
-    DataEncrypted.pbData,
-    DataEncrypted.cbData,
-    ENCODING_FLAG | CRYPT_STRING_NOCRLF,
-    *out,
-    &encodedStringLength);
-  LocalFree(DataEncrypted.pbData);
-
-#else
   ms_uint32 v[4], w[4];
   const ms_uint32 *k;
   int last_block = MS_FALSE;
-  char *buffer = *out;
 
   /* Casting the key this way is safe only as long as longs are 4 bytes
    * on this platform */
@@ -380,16 +335,15 @@ void msEncryptStringWithKey(const unsigned char *key, const char *in, char **out
     encipher(v, w, k);
 
     /* Append hex-encoded bytes to output, 4 bytes at a time */
-    msHexEncode((unsigned char *)w, buffer, 4);
-    buffer += 8;
-    msHexEncode((unsigned char *)(w+1), buffer, 4);
-    buffer += 8;
+    msHexEncode((unsigned char *)w, out, 4);
+    out += 8;
+    msHexEncode((unsigned char *)(w+1), out, 4);
+    out += 8;
 
   }
 
   /* Make sure output is 0-terminated */
-  *buffer = '\0';
-#endif
+  *out = '\0';
 }
 
 /**********************************************************************
@@ -403,51 +357,6 @@ void msEncryptStringWithKey(const unsigned char *key, const char *in, char **out
 
 void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out)
 {
-#ifdef USE_DPAPI
-  BOOL result;
-  DATA_BLOB DataEncrypted, DataUnencrypted, DataKey;
-
-
-  //the input data is HEXRAW encoded
-  //first call is to get the length of the binary buffer for the encrpyted data
-  result = CryptStringToBinary(
-    in,
-    0,
-    ENCODING_FLAG,
-    NULL,
-    &DataEncrypted.cbData,
-    NULL,
-    NULL);
-  // Allocate the buffer for the encrpyted data
-  DataEncrypted.pbData = msSmallMalloc(DataEncrypted.cbData);
-  //Decode the encrpted data
-  result = CryptStringToBinary(
-    in,
-    0,
-    ENCODING_FLAG,
-    DataEncrypted.pbData,
-    &DataEncrypted.cbData,
-    NULL,
-    NULL);
-  //Unencrypt the decoded data, use the key data as additional entropy
-  DataKey.cbData = MS_ENCRYPTION_KEY_SIZE;
-  DataKey.pbData = (BYTE*)key;
-  result = CryptUnprotectData(
-    &DataEncrypted,
-    NULL,
-    &DataKey,
-    NULL,
-    NULL,
-    CRYPTPROTECT_LOCAL_MACHINE,
-    &DataUnencrypted);
-  //free the encrypted data buffer
-  msFree(DataEncrypted.pbData);
-  //copy tha unencrypted data to the output buffer
-  memcpy(out, DataUnencrypted.pbData, DataUnencrypted.cbData);
-  //free the unecrypted data buffer
-  LocalFree(DataUnencrypted.pbData);
-
-#else
   ms_uint32 v[4], w[4];
   const ms_uint32 *k;
   int last_block = MS_FALSE;
@@ -493,7 +402,78 @@ void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out)
 
   /* Make sure output is 0-terminated */
   *out = '\0';
+}
+
+/**********************************************************************
+*                        msDecryptStringWithTEA()
+*
+* Hex-decodes and then decrypts the contents of string in[] and returns the
+* result in out[] which should have been pre-allocated by the caller
+* to be at least half the size of in[].
+*
+**********************************************************************/
+
+int msDecryptStringWithTEA( mapObj *map, const char *in, char *out )
+{
+   /* Make sure encryption key is loaded. We do this here instead
+   * of at the beginning of the function to avoid loading the
+   * key unless ready necessary. This is a very cheap call if
+   * the key is already loaded
+   */
+   if( msLoadEncryptionKey( map ) != MS_SUCCESS )
+      return MS_FAILURE;
+
+   msDecryptStringWithKey( map->encryption_key, in, out );
+
+   return MS_SUCCESS;
+}
+
+/**********************************************************************
+*                        msIsMapFileProctedByDPAPI()
+*
+* Returns TRUE if the encyption method in the MAP file is DPAPI
+*
+**********************************************************************/
+int msIsMapFileProctedByDPAPI( mapObj *map )
+{
+   const char * encryptMethod = msGetConfigOption( map, "MS_ENCRYPTION_METHOD" );
+   if( encryptMethod != NULL && strcasecmp( encryptMethod, "DPAPI" ) == 0 )
+   {
+      return MS_TRUE;
+   }
+   else
+   {
+      return MS_FALSE;
+   }
+}
+
+/**********************************************************************
+*                        msDecryptString()
+*
+* Hex-decodes and then decrypts the contents of string in[] and returns the
+* result in out[] which should have been pre-allocated by the caller
+* to be at least half the size of in[].
+*
+**********************************************************************/
+int msDecryptString( mapObj *map, const char *in, char *out )
+{
+
+   if( msIsMapFileProctedByDPAPI( map ) == MS_TRUE )
+   {
+#ifdef SUPPORT_DPAPI   
+      msDecryptStringWithDPAPI(in, out);
+      return MS_SUCCESS;
+#else      
+      msSetError(MS_MISCERR, "The map file was encrypted using DPAPI method, this version of mapserver does not support DPAPI.",
+         "msDecryptString()");
+      return MS_FAILURE;
 #endif
+   }
+   else
+   {
+      return msDecryptStringWithTEA( map, in, out );
+   }
+
 }
 
 /**********************************************************************
@@ -508,9 +488,9 @@ void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out)
 char *msDecryptStringTokens(mapObj *map, const char *in)
 {
   char *outbuf, *out;
-
+  
   if (map == NULL) {
-    msSetError(MS_MISCERR, "NULL MapObj.", "msLoadEncryptionKey()");
+    msSetError(MS_MISCERR, "NULL MapObj.", "msDecryptStringTokens()");
     return NULL;
   }
 
@@ -535,11 +515,15 @@ char *msDecryptStringTokens(mapObj *map, const char *in)
            pszEnd - pszStart > 1) {
         const char *pszTmp;
         valid_token = MS_TRUE;
-        for(pszTmp = pszStart; pszTmp < pszEnd; pszTmp++) {
-          if (!isxdigit(*pszTmp)) {
-            valid_token = MS_FALSE;
-            break;
-          }
+       
+        //For DPAPI, we assume that the string is BASE 64 otherwise the Decryption API will fail anyways
+        if( msIsMapFileProctedByDPAPI( map ) == FALSE ) {
+           for( pszTmp = pszStart; pszTmp < pszEnd; pszTmp++ ) {
+              if( !isxdigit( *pszTmp ) ) {
+                 valid_token = MS_FALSE;
+                 break;
+              }
+           }
         }
       }
 
@@ -547,18 +531,14 @@ char *msDecryptStringTokens(mapObj *map, const char *in)
         /* Go ahead and decrypt the token */
         char *pszTmp;
 
-        /* Make sure encryption key is loaded. We do this here instead
-         * of at the beginning of the function to avoid loading the
-         * key unless ready necessary. This is a very cheap call if
-         * the key is already loaded
-         */
-        if (msLoadEncryptionKey(map) != MS_SUCCESS)
-          return NULL;
-
         pszTmp = (char*)malloc( (pszEnd-pszStart+1)*sizeof(char));
         strlcpy(pszTmp, pszStart, (pszEnd-pszStart)+1);
 
-        msDecryptStringWithKey(map->encryption_key, pszTmp, out);
+        if( msDecryptString( map, pszTmp, out ) != MS_SUCCESS )
+        {
+           free( pszTmp );
+           return NULL;
+        }
 
         out += strlen(out);
         in = pszEnd+1;
@@ -577,6 +557,123 @@ char *msDecryptStringTokens(mapObj *map, const char *in)
   return outbuf;
 }
 
+/* DPAPI Functions*/
+#ifdef SUPPORT_DPAPI
+/**********************************************************************
+*                        msEncryptStringWithDPAPI()
+*
+* Encrypts and base64-encodes the contents of string in[] and returns the
+* result in **out. Caller must free up the memory allocated by out.
+**********************************************************************/
+void msEncryptStringWithDPAPI( const char *in, char ** out )
+{
+   DATA_BLOB DataEncrypted, DataUnencrypted;
+   BOOL result;
+   
+   //Length of the resulting base64 String
+   DWORD encodedStringLength = 0;
+
+   DataUnencrypted.pbData = (byte *)in;
+   DataUnencrypted.cbData = (DWORD)strlen( in ) + 1;
+
+   // encrypt the string
+   result = CryptProtectData(
+      &DataUnencrypted,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      CRYPTPROTECT_LOCAL_MACHINE,
+      &DataEncrypted );
+
+   
+   // Now create a base64 encoded string out of the binary data    
+   // the first call is to get the length of the resulting hex string
+   result = CryptBinaryToStringA(
+      DataEncrypted.pbData,
+      DataEncrypted.cbData,
+      ENCODING_FLAG | CRYPT_STRING_NOCRLF,
+      NULL,
+      &encodedStringLength );
+
+   //Allocate the buffer for encodedstring using encodedStringLength,
+   //which is number of characters, including the terminating NULL character
+   *out = msSmallMalloc(encodedStringLength );
+
+   //Now we allocated the buffer for encoded string, call it again to get the encoded string   
+   result = CryptBinaryToStringA(
+      DataEncrypted.pbData,
+      DataEncrypted.cbData,
+      ENCODING_FLAG | CRYPT_STRING_NOCRLF,
+      *out,
+      &encodedStringLength );
+
+   
+   LocalFree( DataEncrypted.pbData ); 
+}
+
+/**********************************************************************
+*                        msDecryptStringWithDPAPI()
+*
+* Base64-decodes and then decrypts the contents of string in[] and returns the
+ * result in out[] which should have been pre-allocated by the caller
+ * to be at least half the size of in[].
+*
+**********************************************************************/
+void msDecryptStringWithDPAPI( const char * in, char * out )
+{
+   BOOL result;
+   DATA_BLOB DataEncrypted, DataUnencrypted;
+
+   //the input data is Base64 encoded
+   //first call is to get the length of the binary buffer for the encrpyted data
+   result = CryptStringToBinaryA(
+      in,
+      0,
+      ENCODING_FLAG,
+      NULL,
+      &DataEncrypted.cbData,
+      NULL,
+      NULL );
+
+   // Allocate the buffer for the encrpyted data
+   DataEncrypted.pbData = msSmallMalloc( DataEncrypted.cbData );
+
+   //Second call to decode the encrpted data
+   result = CryptStringToBinaryA(
+      in,
+      0,
+      ENCODING_FLAG,
+      DataEncrypted.pbData,
+      &DataEncrypted.cbData,
+      NULL,
+      NULL );
+
+   //Now we have decoded data, uprotect it
+   result = CryptUnprotectData(
+      &DataEncrypted,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      CRYPTPROTECT_LOCAL_MACHINE,
+      &DataUnencrypted );
+
+   //free the encrypted data buffer
+   msFree( DataEncrypted.pbData );
+   
+   //copy the plain string to out
+   memcpy( out, DataUnencrypted.pbData, DataUnencrypted.cbData );
+
+   //free the unecrypted data buffer
+   LocalFree( DataUnencrypted.pbData ); 
+  
+   /* Make sure output is 0-terminated */
+   out += DataUnencrypted.cbData;   
+   *out = '\0';
+}
+
+#endif
 
 #ifdef TEST_MAPCRYPTO
 
