@@ -36,7 +36,7 @@ SET (CMAKE_SWIG_OUTDIR "${CMAKE_CURRENT_BINARY_DIR}")
 SET( CMAKE_SWIG_FLAGS -namespace OSGeo.MapServer ${MAPSERVER_COMPILE_DEFINITIONS} -DWIN32)
 SWIG_ADD_MODULE(csharpmapscript csharp ../mapscript.i)
 
-set_target_properties(csharpmapscript PROPERTIES OUTPUT_NAME "mapscript")
+#set_target_properties(csharpmapscript PROPERTIES OUTPUT_NAME "mapscript")
 
 SWIG_LINK_LIBRARIES(csharpmapscript ${MAPSERVER_LIBMAPSERVER})
 
