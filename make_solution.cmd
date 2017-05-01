@@ -3,7 +3,6 @@ set BASE_DIR=%SRC_DIR%..
 
 Rem extract the prebuilt prerequisites, using cmake for this avoids additional installation prerequistes
 pushd "%BASE_DIR%"
-cmake -E tar xv "%SRC_DIR%\prerequisites\mapserver_prerequisites.zip"
 popd
 set ORACLE_HOME=%BASE_DIR%\instantclient_12_1\
 set PREREQ_DIR=%BASE_DIR%\release-1800-x64
