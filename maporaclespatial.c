@@ -3111,7 +3111,7 @@ int msOracleSpatialLayerGetItems( layerObj *layer )
 
      /*  if (layer->debug)
             msDebug("msOracleSpatialLayerGetItems checking type. Column = %s Type = %d\n", rzt, rzttype);  */
-    flk = (char *)malloc(sizeof(char *) * flk_len+1);
+    flk = (char *)malloc(sizeof(char*) * flk_len+1);
     if (flk == NULL) {
       msSetError( MS_ORACLESPATIALERR, "No memory avaliable to allocate the items", "msOracleSpatialLayerGetItems()" );
       if (geom_column_name) free(geom_column_name);
