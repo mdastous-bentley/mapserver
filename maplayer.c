@@ -1605,7 +1605,8 @@ char* msLayerBuildSQLOrderBy(layerObj *layer)
   if( layer->sortBy.nProperties > 0 ) {
     int i;
     for(i=0;i<layer->sortBy.nProperties;i++) {
-      char* escaped = msLayerEscapePropertyName(layer, layer->sortBy.properties[i].item);
+      char* escaped = msSmallMalloc(strlen(layer->sortBy.properties[i].item) + 3);
+      sprintf(escaped, "\"%s\"", layer->sortBy.properties[i].item);
       if( i > 0 )
         strOrderBy = msStringConcatenate(strOrderBy, ", ");
       strOrderBy = msStringConcatenate(strOrderBy, escaped);
