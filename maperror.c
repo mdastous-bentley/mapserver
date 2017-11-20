@@ -234,6 +234,8 @@ void msResetErrorList()
   ms_error->message[0] = '\0';
   ms_error->errorcount = 0;
 
+  ms_error->isreported = MS_FALSE;
+
   /* -------------------------------------------------------------------- */
   /*      Cleanup our entry in the thread list.  This is mainly           */
   /*      imprortant when msCleanup() calls msResetErrorList().           */
