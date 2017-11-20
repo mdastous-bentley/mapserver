@@ -713,7 +713,7 @@ int msMSSQL2008LayerOpen(layerObj *layer)
 {
   msMSSQL2008LayerInfo  *layerinfo;
   char                *index, *maskeddata;
-  int                 i, count;
+  int                 i;
   char *conn_decrypted = NULL;
 
   if(layer->debug) {
@@ -778,14 +778,13 @@ int msMSSQL2008LayerOpen(layerObj *layer)
       msDebug("FAILURE!!!");
       maskeddata = (char *)msSmallMalloc(strlen(layer->connection) + 1);
       strcpy(maskeddata, layer->connection);
-      index = strstr(maskeddata, "password=");
+      index = strstr(maskeddata, "pwd=");
       if(index != NULL) {
-        index = (char *)(index + 9);
-        count = (int)(strstr(index, " ") - index);
-        for(i = 0; i < count; i++) {
-          strlcpy(index, "*", (int)1);
-          index++;
-        }
+        index = (char *)(index + 4);
+		
+		//overwrite password string with '*', password ends either with a ';' or with the end of the string
+		for (i = 0; index[i] != ';' && index[i] != '\0'; i++)
+            index[i] = '*';
       }
 
       if (layerinfo->conn) {
