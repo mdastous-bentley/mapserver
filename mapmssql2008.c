@@ -917,7 +917,7 @@ static int prepare_database(layerObj *layer, rectObj rect, char **query_string)
     Plus SRID + comma - if SRID is a long...we'll be safe with 10 chars
   */
   char        box3d[40 + 10 * 22 + 11];
-  char        query_string_temp[10000];       /* Should be big enough */
+  char        *query_string_temp = NULL;
   int         t;
 
   char        *pos_from, *pos_ftab, *pos_space, *pos_paren;
@@ -977,30 +977,50 @@ static int prepare_database(layerObj *layer, rectObj rect, char **query_string)
 
     columns_wanted = msStrdup(buffer);
   } else {
-    char buffer[10000] = "";
+    char   *buffer = NULL;
+    size_t bufLen = 0;
+    size_t sqlFunctionLen = strlen("convert(varchar(max), []),");
+
+    // First figure out the total length of the SQL select statement: column name length  + 'convert(varchar(max), [],' length
+    for (t = 0; t < layer->numitems; t++) {
+      bufLen += strlen(layer->items[t]) + sqlFunctionLen;
+    }
+
+    // Add the geometry + unique ID column name length
+    bufLen += strlen(layerinfo->geom_column);
+    bufLen += strlen(layerinfo->urid_name);
+    bufLen += 150;  // Add more room for the operators/functions calls against geometry + unique ID - 150 should be enough
+
+    if (NULL == (buffer = msSmallMalloc(sizeof(char) * bufLen))) {
+      msSetError(MS_QUERYERR, "No memory avaliable to allocate the column values", "prepare_database()");
+      return MS_FAILURE;
+    }
+
+    buffer[0] = '\0';
 
     for(t = 0; t < layer->numitems; t++) {
       if (layerinfo->itemtypes && (layerinfo->itemtypes[t] == SQL_BINARY || layerinfo->itemtypes[t] == SQL_VARBINARY)) {
 #ifdef USE_ICONV
-      snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), "convert(nvarchar(max), convert(varbinary(max),[%s]),2),", layer->items[t]);
+      snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(nvarchar(max), convert(varbinary(max),[%s]),2),", layer->items[t]);
 #else
-      snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), "convert(varchar(max), convert(varbinary(max),[%s]),2),", layer->items[t]);
+      snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(varchar(max), convert(varbinary(max),[%s]),2),", layer->items[t]);
 #endif
       } else {
 #ifdef USE_ICONV
-      snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), "convert(nvarchar(max), [%s]),", layer->items[t]);
+      snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(nvarchar(max), [%s]),", layer->items[t]);
 #else
-      snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), "convert(varchar(max), [%s]),", layer->items[t]);
+      snprintf(buffer  + strlen(buffer), bufLen - strlen(buffer), "convert(varchar(max), [%s]),", layer->items[t]);
 #endif
       }
     }
 
     if (layerinfo->geometry_format == MSSQLGEOMETRY_NATIVE)
-      snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), "[%s],convert(varchar(36), [%s])", layerinfo->geom_column, layerinfo->urid_name);
+      snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "[%s],convert(varchar(36), [%s])", layerinfo->geom_column, layerinfo->urid_name);
     else
-      snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), "[%s].STAsBinary(),convert(varchar(36), [%s])", layerinfo->geom_column, layerinfo->urid_name);
+      snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "[%s].STAsBinary(),convert(varchar(36), [%s])", layerinfo->geom_column, layerinfo->urid_name);
 
     columns_wanted = msStrdup(buffer);
+    msFree(buffer);
   }
 
   if (rect.minx == rect.maxx || rect.miny == rect.maxy) {
@@ -1065,22 +1085,46 @@ static int prepare_database(layerObj *layer, rectObj rect, char **query_string)
   msMSSQL2008LayerGetExtent(layer, &extent);
   if (rect.minx <= extent.minx && rect.miny <= extent.miny && rect.maxx >= extent.maxx && rect.maxy >= extent.maxy) {
       /* no spatial filter used */
+      // Compute the size of the query
+      size_t queryLength = strlen(columns_wanted) + strlen(data_source) + (layer->filter.native_string != NULL ? strlen(layer->filter.native_string) : 0) 
+	  		+ (msLayerGetProcessingKey(layer, "NATIVE_FILTER") != NULL ? strlen(msLayerGetProcessingKey(layer, "NATIVE_FILTER")) : 0);
+      queryLength += 100;   // Added for SELECT %s from %s WHERE (%s) - 100 should be enough
+
+      if (NULL == (query_string_temp = msSmallMalloc(sizeof(char) * queryLength))) {
+        msSetError(MS_QUERYERR, "No memory avaliable to allocate the query", "prepare_database()");
+        return MS_FAILURE;
+      }
+
+      query_string_temp[0] = '\0';
+
       if ( layer->filter.native_string ) { 
-        snprintf(query_string_temp, sizeof(query_string_temp), "SELECT %s from %s WHERE (%s)", columns_wanted, data_source, layer->filter.native_string );
+        snprintf(query_string_temp, queryLength, "SELECT %s from %s WHERE (%s)", columns_wanted, data_source, layer->filter.native_string );
       }
       else if(msLayerGetProcessingKey(layer, "NATIVE_FILTER") == NULL) {
-        snprintf(query_string_temp, sizeof(query_string_temp), "SELECT %s from %s", columns_wanted, data_source );
+        snprintf(query_string_temp, queryLength, "SELECT %s from %s", columns_wanted, data_source);
       } else {
-        snprintf(query_string_temp, sizeof(query_string_temp), "SELECT %s from %s WHERE (%s)", columns_wanted, data_source, msLayerGetProcessingKey(layer, "NATIVE_FILTER"));
+        snprintf(query_string_temp, queryLength, "SELECT %s from %s WHERE (%s)", columns_wanted, data_source, msLayerGetProcessingKey(layer, "NATIVE_FILTER"));
       }
   } else {
+      // Compute the size of the query
+      size_t queryLength = strlen(columns_wanted) + strlen(data_source) + strlen(layerinfo->geom_column) + strlen(box3d) + (layer->filter.native_string != NULL ? strlen(layer->filter.native_string) : 0)
+	  		+ (msLayerGetProcessingKey(layer, "NATIVE_FILTER") != NULL ? strlen(msLayerGetProcessingKey(layer, "NATIVE_FILTER")) : 0);
+      queryLength += 200;   // Added for SELECT %s from %s WHERE (%s) AND %s.STIntersects(%s) - 200 should be enough
+
+      if (NULL == (query_string_temp = msSmallMalloc(sizeof(char) * queryLength))) {
+        msSetError(MS_QUERYERR, "No memory avaliable to allocate the query", "prepare_database()");
+        return MS_FAILURE;
+      }
+
+      query_string_temp[0] = '\0';
+
       if ( layer->filter.native_string ) { 
-        snprintf(query_string_temp, sizeof(query_string_temp), "SELECT %s from %s WHERE (%s) and %s.STIntersects(%s) = 1 ", columns_wanted, data_source, layer->filter.native_string, layerinfo->geom_column, box3d );
+        snprintf(query_string_temp, queryLength, "SELECT %s from %s WHERE (%s) and %s.STIntersects(%s) = 1 ", columns_wanted, data_source, layer->filter.native_string, layerinfo->geom_column, box3d );
       }
       else if(msLayerGetProcessingKey(layer, "NATIVE_FILTER") == NULL) {
-        snprintf(query_string_temp, sizeof(query_string_temp), "SELECT %s from %s WHERE %s.STIntersects(%s) = 1 ", columns_wanted, data_source, layerinfo->geom_column, box3d );
+        snprintf(query_string_temp, queryLength, "SELECT %s from %s WHERE %s.STIntersects(%s) = 1 ", columns_wanted, data_source, layerinfo->geom_column, box3d);
       } else {
-        snprintf(query_string_temp, sizeof(query_string_temp), "SELECT %s from %s WHERE (%s) and %s.STIntersects(%s) = 1 ", columns_wanted, data_source, msLayerGetProcessingKey(layer, "NATIVE_FILTER"), layerinfo->geom_column, box3d );
+        snprintf(query_string_temp, queryLength, "SELECT %s from %s WHERE (%s) and %s.STIntersects(%s) = 1 ", columns_wanted, data_source, msLayerGetProcessingKey(layer, "NATIVE_FILTER"), layerinfo->geom_column, box3d );
       }
   }
 
@@ -1098,10 +1142,11 @@ static int prepare_database(layerObj *layer, rectObj rect, char **query_string)
 
   if (executeSQL(layerinfo->conn, query_string_temp)) {
     *query_string = msStrdup(query_string_temp);
-
+    msFree(query_string_temp);
     return MS_SUCCESS;
   } else {
     msSetError(MS_QUERYERR, "Error executing MSSQL2008 SQL statement: %s\n-%s\n", "msMSSQL2008LayerGetShape()", query_string_temp, layerinfo->conn->errorMessage);
+	msFree(query_string_temp);
 
     return MS_FAILURE;
   }
