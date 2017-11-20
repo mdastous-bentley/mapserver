@@ -3602,6 +3602,44 @@ int msTranslateWMS2Mapserv(const char **names, const char **values, int numentri
 }
 
 /*
+This function sets the header in response for each custom header define responseheaders group
+in map's web metadata
+e.g "wms_responseheaders" "Etag"
+    "wms_etag_responseheader" "534534534543"
+*/
+void msWMSCustomResponseHeaders( mapObj *map, const char *metadata_namespaces )
+{ 
+   const char *headerValue = NULL; /*value of response header in metadata*/
+   const char *headersList = NULL; /*list of response headers used in wms_[headername]_responseheader in metadata */   
+   char *pszHeaderKeyName = NULL;  /*key to lookup response header define in wms_responseheaders */
+   char **headerTokens = NULL;     /*array of responser headers*/
+   int numTokens, sheaderKeyName = 0;
+
+   /*Look up for list of response headers in web metadata*/
+   if( (headersList = msOWSLookupMetadata( &(map->web.metadata), metadata_namespaces, "responseheaders" )) != NULL &&
+      headersList[0] != '\0' ) {
+      /*split the comma seperated headers into an array*/
+      headerTokens = msStringSplit( headersList, ',', &numTokens );
+      if( headerTokens && headerTokens > 0 ) {
+         /*set maximum size of responseheader key for each header to the total size of the headers list so that
+         its big enough*/
+         sheaderKeyName = 25 + strlen( headersList );
+         pszHeaderKeyName = (char*)msSmallMalloc( sheaderKeyName );
+         /*Loop thru each header token and look up in the metadata and set the header in response*/
+         for( int i = 0; i < numTokens; i++ ) {            
+            snprintf( pszHeaderKeyName, sheaderKeyName, "%s_responseheader", headerTokens[i] );
+            if( (headerValue = msOWSLookupMetadata( &(map->web.metadata), metadata_namespaces, pszHeaderKeyName )) ) {
+               msIO_setHeader( headerTokens[i], "%s", headerValue );
+            }
+         }
+         msFree( pszHeaderKeyName );
+      }
+
+      msFreeCharArray( headerTokens, numTokens );
+   }
+}
+
+/*
 ** msWMSGetMap()
 */
 int msWMSGetMap(mapObj *map, int nVersion, char **names, char **values, int numentries,
@@ -3689,6 +3727,9 @@ int msWMSGetMap(mapObj *map, int nVersion, char **names, char **values, int nume
   if( (http_max_age = msOWSLookupMetadata(&(map->web.metadata), "MO", "http_max_age")) ) {
     msIO_setHeader("Cache-Control","max-age=%s", http_max_age);
   }
+
+  /*Add custom response headers*/
+  msWMSCustomResponseHeaders( map, "MO" );
 
   if (strcasecmp(map->imagetype, "application/openlayers")!=0) {
     if(!strcmp(MS_IMAGE_MIME_TYPE(map->outputformat), "application/json")) {
@@ -5051,4 +5092,7 @@ int msWMSDispatch(mapObj *map, cgiRequestObj *req, owsRequestObj *ows_request, i
   return(MS_FAILURE);
 #endif
 }
+
+
+
 
