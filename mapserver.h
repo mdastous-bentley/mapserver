@@ -31,6 +31,8 @@
 
 #include "mapserver-config.h"
 
+
+
 /*
 ** Main includes. If a particular header was needed by several .c files then
 ** I just put it here. What the hell, it works and it's all right here. -SDL-
@@ -58,6 +60,7 @@
 #if defined(_WIN32) && !defined(__CYGWIN__)
 #  define MS_DLL_EXPORT     __declspec(dllexport)
 #define USE_MSFREE
+#define SUPPORT_DPAPI
 #else
 #define  MS_DLL_EXPORT
 #endif
@@ -2864,7 +2867,19 @@ void msPopulateTextSymbolForLabelAndString(textSymbolObj *ts, labelObj *l, char 
   MS_DLL_EXPORT void msDecryptStringWithKey(const unsigned char *key, const char *in, char *out);
   MS_DLL_EXPORT char *msDecryptStringTokens(mapObj *map, const char *in);
   MS_DLL_EXPORT void msHexEncode(const unsigned char *in, char *out, int numbytes);
-  MS_DLL_EXPORT int msHexDecode(const char *in, unsigned char *out, int numchars);
+  MS_DLL_EXPORT int msHexDecode(const char *in, unsigned char *out, int numchars);    
+  MS_DLL_EXPORT int msIsMapFileProctedByDPAPI( mapObj *map );
+  int msDecryptStringWithTEA( mapObj *map, const char *in, char *out );
+  int msDecryptString( mapObj *map, const char *in, char *out );
+#ifdef SUPPORT_DPAPI
+  /* =======================================================================  */
+  /* prototypes for mapcrypto.c encrypt/decrypt functions using DPAPI method  */
+  /* =======================================================================  */
+  
+  MS_DLL_EXPORT void msEncryptStringWithDPAPI( const char *in, char ** out );
+  MS_DLL_EXPORT void msDecryptStringWithDPAPI( const char * in, char * out );    
+
+#endif
 
   /* ==================================================================== */
   /*      prototypes for functions in mapxmp.c                            */
