@@ -2105,7 +2105,7 @@ int msMSSQL2008LayerRetrievePK(layerObj *layer, char **urid_name, char* table_na
            "                     sys.tables ON sys.indexes.object_id = sys.tables.object_id INNER JOIN "
            "                     sys.index_columns ON sys.indexes.object_id = sys.index_columns.object_id AND sys.indexes.index_id = sys.index_columns.index_id ON "
            "                     sys.columns.object_id = sys.index_columns.object_id AND sys.columns.column_id = sys.index_columns.column_id "
-           "WHERE     (sys.indexes.is_primary_key = 1) AND (sys.tables.name = N'%s') ",
+           "WHERE     (sys.indexes.is_primary_key = 1) AND (sys.tables.name = PARSENAME(N'%s',1)) ",
            table_name);
 
   if (debug) {
