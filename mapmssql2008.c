@@ -979,7 +979,7 @@ static int prepare_database(layerObj *layer, rectObj rect, char **query_string)
   } else {
     char   *buffer = NULL;
     size_t bufLen = 0;
-    size_t sqlFunctionLen = strlen("convert(varchar(max), []),");
+    size_t sqlFunctionLen = strlen("convert(varchar(max), [], 120),"); // Reserve space for ', 120' just in case it will do datetime conversion.
 
     // First figure out the total length of the SQL select statement: column name length  + 'convert(varchar(max), [],' length
     for (t = 0; t < layer->numitems; t++) {
@@ -1005,7 +1005,17 @@ static int prepare_database(layerObj *layer, rectObj rect, char **query_string)
 #else
       snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(varchar(max), convert(varbinary(max),[%s]),2),", layer->items[t]);
 #endif
-      } else {
+      }
+      // By default, when converting datetime to string, MS SQLServer use format 'mon dd yyyy hh:miAM (or PM)' which is not supported by MapServer.
+      // We need to use code 120 (ODBC canonical date and time), which is in the format of 'yyyy-mm-dd HH:mm:ss'.
+      else if (layerinfo->itemtypes && (layerinfo->itemtypes[t] == SQL_TYPE_DATE || layerinfo->itemtypes[t] == SQL_TYPE_TIME || layerinfo->itemtypes[t] == SQL_TYPE_TIMESTAMP)) {
+#ifdef USE_ICONV
+          snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(nvarchar(max), [%s], 120),", layer->items[t]);
+#else
+          snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(varchar(max), [%s], 120),", layer->items[t]);
+#endif
+      }
+      else {
 #ifdef USE_ICONV
       snprintf(buffer + strlen(buffer), bufLen - strlen(buffer), "convert(nvarchar(max), [%s]),", layer->items[t]);
 #else
